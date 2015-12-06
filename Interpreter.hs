@@ -1,30 +1,45 @@
 module Main where
 
+import Grammar
 import Parser
 import Evaluator
+import Environment
 
 import System.Environment
 import System.IO
 import Control.Monad.Except
+import Data.IORef
 
 
 main :: IO ()
 main = do 
     args <- getArgs
-    case length args of
-        0         -> runRepl
-        1         -> evalAndPrint $ args !! 0
-        otherwise -> putStrLn "Program takes only 0 or 1 argument"
+    if null args then runRepl else runProgram args
 
 runRepl :: IO ()
-runRepl = until_ (== "quit") (readPrompt "Lisp>>> ") evalAndPrint
+runRepl = do 
+    env <- primitiveBindings 
+    evalAndPrint env "(load \"lib/stdlib.scm\")" 
+    replLoop (readPrompt "Lisp >>= ") . evalAndPrint $ env
 
-until_ :: Monad m => (a -> Bool) -> m a -> (a -> m ()) -> m ()
-until_ pred prompt action = do 
+runProgram :: [String] -> IO ()
+runProgram args = do
+    env <- primitiveBindings >>= flip bindVars [("args", List $ map String $ drop 1 args)] 
+    runIOError (liftM show $ eval env (List [Atom "load", String (head args)])) >>= hPutStrLn stderr
+
+primitiveBindings :: IO Env
+primitiveBindings = nullEnv >>= flip bindVars ps
+  where 
+    ps = (map (makeFunc PrimitiveFunc) primitives ++ map (makeFunc IOFunc) primitivesIO)
+    makeFunc constructor (var, func) = (var, constructor func)
+
+replLoop :: Monad m => m String -> (String -> m ()) -> m ()
+replLoop prompt action = do 
     result <- prompt
-    if pred result 
-        then return ()
-        else action result >> until_ pred prompt action
+    case result of
+        ":q"      -> return ()
+        ":std"    -> action "(load \"lib/stdlib.scm\")" >> replLoop prompt action
+        otherwise -> action result >> replLoop prompt action
 
 readPrompt :: String -> IO String
 readPrompt prompt = flushStr prompt >> getLine
@@ -32,14 +47,21 @@ readPrompt prompt = flushStr prompt >> getLine
 flushStr :: String -> IO ()
 flushStr str = putStr str >> hFlush stdout
 
-evalAndPrint :: String -> IO ()
-evalAndPrint expr =  evalString expr >>= putStrLn
+evalAndPrint :: Env -> String -> IO ()
+evalAndPrint env expr =  evalString env expr >>= putStrLn
 
-evalString :: String -> IO String
-evalString expr = return $ extractValue $ catchError (liftM show $ readExpr expr >>= eval) (return . show)
+evalString :: Env -> String -> IO String
+evalString env expr = runIOError $ liftM show $ liftError (readExpr expr) >>= eval env
   where
     extractValue (Right v) = v
 
+
+{-
+until_ :: Monad m => (a -> Bool) -> m a -> (a -> m ()) -> m ()
+until_ pred prompt action = do 
+    result <- prompt
+    unless (pred result) $ action result >> until_ pred prompt action
+-}
 
 
 

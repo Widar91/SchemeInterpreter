@@ -11,10 +11,13 @@ import Data.Ratio
 import Data.Array
 
 
-readExpr :: String -> ErrorMonad LispVal 
-readExpr input = case parse parseExpr "lisp program" input of
+readOrError :: Parser a -> String -> ErrorM a
+readOrError parser input = case parse parser "lisp" input of
     Left  e -> throwError $ Parser e
     Right v -> return v 
+
+readExpr     = readOrError parseExpr
+readExprList = readOrError (sepBy parseExpr (spaces1 <|> eof))
 
 
 -------------
@@ -43,8 +46,8 @@ parseList = do
 
 parseList' :: Parser LispVal
 parseList' = do 
-    h <- sepEndBy parseExpr spaces
-    (char '.' >> spaces >> parseExpr >>= \t -> return (DottedList h t)) <|> return (List h)
+    h <- spaces >> sepEndBy parseExpr spaces1
+    (char '.' >> spaces1 >> parseExpr >>= \t -> return (DottedList h t)) <|> return (List h)
 
 parseQuoted :: Parser LispVal
 parseQuoted = do
@@ -106,7 +109,7 @@ parseChar = do
 parseVector :: Parser LispVal
 parseVector = do
     char '('
-    xs <- sepBy parseExpr spaces
+    xs <- sepBy parseExpr spaces1
     char ')'
     return $ Vector (listArray (0, length xs - 1) xs)
 
@@ -156,7 +159,10 @@ symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=>?@^_~"
 
 spaces :: Parser ()
-spaces = skipMany1 space
+spaces = skipMany space
+
+spaces1 :: Parser ()
+spaces1 = skipMany1 space
 
 
 -- Helper Functions
